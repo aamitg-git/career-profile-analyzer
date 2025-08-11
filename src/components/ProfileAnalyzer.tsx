@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { Loader2, Brain, AlertCircle } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Loader2, Brain, AlertCircle, Upload, FileText, X } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
+import { FileProcessor, type FileUploadResult } from '@/utils/fileProcessor';
 import type { AnalysisData } from '@/pages/Index';
 
 interface ProfileAnalyzerProps {
@@ -24,10 +26,57 @@ export const ProfileAnalyzer: React.FC<ProfileAnalyzerProps> = ({
   const [jobDescription, setJobDescription] = useState('');
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [model, setModel] = useState('llama3.2');
+  const [uploadedFile, setUploadedFile] = useState<FileUploadResult | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsProcessingFile(true);
+    
+    try {
+      const result = await FileProcessor.processFile(file);
+      
+      if (result.error) {
+        toast({
+          title: "File Processing Error",
+          description: result.error,
+          variant: "destructive",
+        });
+      } else {
+        setUploadedFile(result);
+        setProfile(result.text);
+        toast({
+          title: "File Uploaded",
+          description: `Successfully processed ${result.filename}`,
+        });
+      }
+    } catch (error) {
+      toast({
+        title: "Upload Failed",
+        description: "Failed to process the uploaded file",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessingFile(false);
+    }
+  };
+
+  const clearUploadedFile = () => {
+    setUploadedFile(null);
+    setProfile('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const analyzeProfile = async () => {
-    if (!profile.trim() || !jobDescription.trim()) {
+    const profileText = profile.trim() || uploadedFile?.text?.trim() || '';
+    
+    if (!profileText || !jobDescription.trim()) {
       toast({
         title: "Missing Information",
         description: "Please provide both your profile and the job description.",
@@ -43,7 +92,7 @@ export const ProfileAnalyzer: React.FC<ProfileAnalyzerProps> = ({
 You are a career advisor AI. Analyze the following profile against the job description and provide a structured response.
 
 CURRENT PROFILE:
-${profile}
+${profileText}
 
 TARGET JOB DESCRIPTION:
 ${jobDescription}
@@ -152,16 +201,77 @@ Format your response as valid JSON only, no additional text.
           <CardHeader>
             <CardTitle>Your Current Profile</CardTitle>
             <CardDescription>
-              Paste your resume, LinkedIn profile, or professional summary
+              Upload a file or paste your resume, LinkedIn profile, or professional summary
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Textarea
-              value={profile}
-              onChange={(e) => setProfile(e.target.value)}
-              placeholder="Enter your current professional profile, resume content, or LinkedIn summary..."
-              className="min-h-[300px]"
-            />
+            <Tabs defaultValue="upload" className="w-full">
+              <TabsList className="grid w-full grid-cols-2">
+                <TabsTrigger value="upload">Upload File</TabsTrigger>
+                <TabsTrigger value="text">Type/Paste Text</TabsTrigger>
+              </TabsList>
+              
+              <TabsContent value="upload" className="space-y-4">
+                <div className="space-y-4">
+                  <div className="flex items-center gap-4">
+                    <Input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".pdf,.doc,.docx,.txt"
+                      onChange={handleFileUpload}
+                      disabled={isProcessingFile}
+                      className="file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-primary-foreground hover:file:bg-primary/90"
+                    />
+                    {uploadedFile && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={clearUploadedFile}
+                        disabled={isProcessingFile}
+                      >
+                        <X className="h-4 w-4 mr-2" />
+                        Clear
+                      </Button>
+                    )}
+                  </div>
+                  
+                  {isProcessingFile && (
+                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Processing file...
+                    </div>
+                  )}
+                  
+                  {uploadedFile && (
+                    <div className="p-3 bg-muted rounded-lg border">
+                      <div className="flex items-center gap-2 mb-2">
+                        <FileText className="h-4 w-4" />
+                        <span className="text-sm font-medium">{uploadedFile.filename}</span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {uploadedFile.text.substring(0, 200)}...
+                      </div>
+                    </div>
+                  )}
+                  
+                  <Alert>
+                    <Upload className="h-4 w-4" />
+                    <AlertDescription>
+                      Supported formats: PDF, Word documents (.doc, .docx), and text files (.txt)
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              </TabsContent>
+              
+              <TabsContent value="text">
+                <Textarea
+                  value={profile}
+                  onChange={(e) => setProfile(e.target.value)}
+                  placeholder="Enter your current professional profile, resume content, or LinkedIn summary..."
+                  className="min-h-[300px]"
+                />
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
 
@@ -186,7 +296,7 @@ Format your response as valid JSON only, no additional text.
       <div className="flex justify-center">
         <Button 
           onClick={analyzeProfile} 
-          disabled={isAnalyzing || !profile.trim() || !jobDescription.trim()}
+          disabled={isAnalyzing || (!profile.trim() && !uploadedFile?.text) || !jobDescription.trim()}
           size="lg"
           className="min-w-[200px]"
         >
